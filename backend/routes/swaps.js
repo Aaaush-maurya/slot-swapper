@@ -26,57 +26,64 @@ router.get('/swappable-slots', auth, async (req, res) => {
 router.post('/swap-request', auth, async (req, res) => {
   const { mySlotId, theirSlotId } = req.body;
   const session = await mongoose.startSession();
-  session.startTransaction();
   try {
-    const [mySlot, theirSlot] = await Promise.all([
-      Event.findById(mySlotId).session(session),
-      Event.findById(theirSlotId).session(session)
-    ]);
-    if (!mySlot || !theirSlot) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({ message: 'Slot not found' });
-    }
-    if (!mySlot.owner.equals(req.user._id)) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(403).json({ message: 'You do not own mySlot' });
-    }
-    if (mySlot.status !== 'SWAPPABLE' || theirSlot.status !== 'SWAPPABLE') {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ message: 'Both slots must be SWAPPABLE' });
-    }
+    await session.withTransaction(async () => {
+      const [mySlot, theirSlot] = await Promise.all([
+        Event.findById(mySlotId).session(session),
+        Event.findById(theirSlotId).session(session)
+      ]);
+      if (!mySlot || !theirSlot) {
+        throw new Error('Slot not found');
+      }
+      if (!mySlot.owner.equals(req.user._id)) {
+        throw new Error('You do not own mySlot');
+      }
+      if (mySlot.status !== 'SWAPPABLE' || theirSlot.status !== 'SWAPPABLE') {
+        throw new Error('Both slots must be SWAPPABLE');
+      }
 
-    // Create swap request
-    const swapReq = await SwapRequest.create([{
-      fromUser: req.user._id,
-      toUser: theirSlot.owner,
-      mySlot: mySlot._id,
-      theirSlot: theirSlot._id,
-      status: 'PENDING'
-    }], { session });
+      // Create swap request
+      const swapReq = await SwapRequest.create([{
+        fromUser: req.user._id,
+        toUser: theirSlot.owner,
+        mySlot: mySlot._id,
+        theirSlot: theirSlot._id,
+        status: 'PENDING'
+      }], { session });
 
-    // Set both slots to SWAP_PENDING
-    mySlot.status = 'SWAP_PENDING';
-    theirSlot.status = 'SWAP_PENDING';
-    await mySlot.save({ session });
-    await theirSlot.save({ session });
+      // Set both slots to SWAP_PENDING
+      mySlot.status = 'SWAP_PENDING';
+      theirSlot.status = 'SWAP_PENDING';
+      await mySlot.save({ session });
+      await theirSlot.save({ session });
+    });
 
-    await session.commitTransaction();
     session.endSession();
 
-    const populated = await SwapRequest.findById(swapReq[0]._id)
-      .populate('fromUser', 'name email')
+    // Fetch populated result after transaction completes
+    const swapReq = await SwapRequest.findOne({
+      'fromUser': req.user._id,
+      'mySlot': mySlotId,
+      'theirSlot': theirSlotId
+    }).populate('fromUser', 'name email')
       .populate('toUser', 'name email')
       .populate('mySlot')
-      .populate('theirSlot');
+      .populate('theirSlot')
+      .sort({ createdAt: -1 });
 
-    res.json(populated);
+    res.json(swapReq);
   } catch (err) {
-    await session.abortTransaction();
     session.endSession();
     console.error(err);
+    if (err.message === 'Slot not found') {
+      return res.status(404).json({ message: 'Slot not found' });
+    }
+    if (err.message === 'You do not own mySlot') {
+      return res.status(403).json({ message: 'You do not own mySlot' });
+    }
+    if (err.message === 'Both slots must be SWAPPABLE') {
+      return res.status(400).json({ message: 'Both slots must be SWAPPABLE' });
+    }
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -89,58 +96,50 @@ router.post('/swap-response/:id', auth, async (req, res) => {
   const { accepted } = req.body;
   const requestId = req.params.id;
   const session = await mongoose.startSession();
-  session.startTransaction();
   try {
-    const swapReq = await SwapRequest.findById(requestId).session(session);
-    if (!swapReq) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({ message: 'Swap request not found' });
-    }
+    await session.withTransaction(async () => {
+      const swapReq = await SwapRequest.findById(requestId).session(session);
+      if (!swapReq) {
+        throw new Error('Swap request not found');
+      }
 
-    // Only the toUser (owner of theirSlot) can accept/reject
-    if (!swapReq.toUser.equals(req.user._id)) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(403).json({ message: 'Not authorized' });
-    }
+      // Only the toUser (owner of theirSlot) can accept/reject
+      if (!swapReq.toUser.equals(req.user._id)) {
+        throw new Error('Not authorized');
+      }
 
-    if (swapReq.status !== 'PENDING') {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ message: 'Request already handled' });
-    }
+      if (swapReq.status !== 'PENDING') {
+        throw new Error('Request already handled');
+      }
 
-    const mySlot = await Event.findById(swapReq.mySlot).session(session);
-    const theirSlot = await Event.findById(swapReq.theirSlot).session(session);
-    if (!mySlot || !theirSlot) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({ message: 'Slots not found' });
-    }
+      const mySlot = await Event.findById(swapReq.mySlot).session(session);
+      const theirSlot = await Event.findById(swapReq.theirSlot).session(session);
+      if (!mySlot || !theirSlot) {
+        throw new Error('Slots not found');
+      }
 
-    if (accepted) {
-      // swap owners and set statuses back to BUSY
-      const tmpOwner = mySlot.owner;
-      mySlot.owner = theirSlot.owner;
-      theirSlot.owner = tmpOwner;
-      mySlot.status = 'BUSY';
-      theirSlot.status = 'BUSY';
-      swapReq.status = 'ACCEPTED';
-      await mySlot.save({ session });
-      await theirSlot.save({ session });
-      await swapReq.save({ session });
-    } else {
-      // rejected: reset slots to SWAPPABLE
-      mySlot.status = 'SWAPPABLE';
-      theirSlot.status = 'SWAPPABLE';
-      swapReq.status = 'REJECTED';
-      await mySlot.save({ session });
-      await theirSlot.save({ session });
-      await swapReq.save({ session });
-    }
+      if (accepted) {
+        // swap owners and set statuses back to BUSY
+        const tmpOwner = mySlot.owner;
+        mySlot.owner = theirSlot.owner;
+        theirSlot.owner = tmpOwner;
+        mySlot.status = 'BUSY';
+        theirSlot.status = 'BUSY';
+        swapReq.status = 'ACCEPTED';
+        await mySlot.save({ session });
+        await theirSlot.save({ session });
+        await swapReq.save({ session });
+      } else {
+        // rejected: reset slots to SWAPPABLE
+        mySlot.status = 'SWAPPABLE';
+        theirSlot.status = 'SWAPPABLE';
+        swapReq.status = 'REJECTED';
+        await mySlot.save({ session });
+        await theirSlot.save({ session });
+        await swapReq.save({ session });
+      }
+    });
 
-    await session.commitTransaction();
     session.endSession();
 
     const populated = await SwapRequest.findById(requestId)
@@ -151,9 +150,20 @@ router.post('/swap-response/:id', auth, async (req, res) => {
 
     res.json(populated);
   } catch (err) {
-    await session.abortTransaction();
     session.endSession();
     console.error(err);
+    if (err.message === 'Swap request not found') {
+      return res.status(404).json({ message: 'Swap request not found' });
+    }
+    if (err.message === 'Not authorized') {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+    if (err.message === 'Request already handled') {
+      return res.status(400).json({ message: 'Request already handled' });
+    }
+    if (err.message === 'Slots not found') {
+      return res.status(404).json({ message: 'Slots not found' });
+    }
     res.status(500).json({ message: 'Server error' });
   }
 });
