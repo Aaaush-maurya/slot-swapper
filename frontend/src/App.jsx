@@ -12,7 +12,7 @@ export default function App(){
   return (
     <div>
       <Navbar />
-      <main className="p-6 max-w-5xl mx-auto">
+      <main className="p-4 md:p-6 max-w-5xl mx-auto">
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/login" element={<Login />} />

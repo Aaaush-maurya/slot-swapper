@@ -2,6 +2,11 @@
 
 A full-stack web application for managing time slots and swapping shifts between users. Built with React (frontend) and Node.js/Express/MongoDB (backend).
 
+## 🌐 Live Demo
+
+- **Frontend**: [https://slot-swapper-fxdb.vercel.app](https://slot-swapper-fxdb.vercel.app)
+- **Backend API**: [https://slot-swapper-backend.vercel.app](https://slot-swapper-backend.vercel.app)
+
 ## Features
 
 - **User Authentication**: Secure signup and login with JWT tokens
@@ -10,6 +15,7 @@ A full-stack web application for managing time slots and swapping shifts between
 - **Marketplace**: Browse and request swaps with other users
 - **Request Management**: View and respond to incoming/outgoing swap requests
 - **Transaction Safety**: Database transactions ensure data consistency during swaps
+- **Mobile Responsive**: Optimized for mobile devices
 
 ## Tech Stack
 

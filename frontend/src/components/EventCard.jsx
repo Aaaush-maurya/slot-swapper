@@ -7,8 +7,8 @@ export default function EventCard({ ev, onMakeSwappable, onDelete }) {
 
   return (
     <div className="mb-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-4">
-        <div>
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+        <div className="flex-1">
           <div className="font-semibold tracking-tight">{ev.title}</div>
           <div className="mt-1 text-sm text-gray-600">
             {new Date(ev.startTime).toLocaleString()} — {new Date(ev.endTime).toLocaleString()}
@@ -17,7 +17,7 @@ export default function EventCard({ ev, onMakeSwappable, onDelete }) {
             <Badge color={statusColor}>{ev.status}</Badge>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {ev.status === 'BUSY' && (
             <Button variant="outline" size="sm" onClick={() => onMakeSwappable(ev._id)}>Make swappable</Button>
           )}
